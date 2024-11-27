@@ -5,13 +5,18 @@ import sys
 import os
 import json
 import threading
-from aiohttp import web
 from nio import (
     AsyncClient,
     LoginResponse,
     InviteEvent,
     MatrixRoom,
 )
+from aiohttp import web
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
+from webdriver_manager.chrome import ChromeDriverManager
 
 # Keep Alive Functionality
 async def handle_root(request):
@@ -31,6 +36,51 @@ with open("config.json", "r") as file:
     homeserver_url = config["homeserver_url"]
     user_id = config["user_id"]
     password = config["password"]
+
+def get_image_url(url):
+    # Set up headless Chrome
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument("--window-size=1920,1080")
+
+    # Initialize the WebDriver
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    try:
+        # Load the page
+        driver.get(url)
+
+        # Wait for the image to load
+        driver.implicitly_wait(10)
+
+        # Find the image element by id
+        image_element = driver.find_element(By.ID, 'screenshot-image')
+
+        # Extract the 'src' attribute
+        image_url = image_element.get_attribute('src')
+
+        # Handle cases where the image URL is invalid
+        if not image_url or 'imageshack' in image_url:
+            print("Image URL is invalid or not available.")
+            return None
+
+        # Handle relative URLs if necessary
+        if image_url.startswith('//'):
+            image_url = 'https:' + image_url
+        elif image_url.startswith('/'):
+            image_url = 'https://prnt.sc' + image_url
+
+        return image_url
+
+    except Exception as e:
+        print(f"Error getting image URL: {e}")
+        return None
+
+    finally:
+        driver.quit()
 
 async def main():
     client = AsyncClient(homeserver_url, user_id)
@@ -64,6 +114,8 @@ async def main():
 
     asyncio.create_task(sync_loop())
 
+    loop = asyncio.get_event_loop()
+
     try:
         while True:
             try:
@@ -77,20 +129,38 @@ async def main():
                 print(f"Testing {random_string}...")
 
                 # Get the URL of the subdirectory
-                url = "https://prnt.sc/" + random_string
+                short_url = "https://prnt.sc/" + random_string
 
-                # Send the URL to all joined rooms
-                for room_id in client.rooms:
+                # Run get_image_url in a separate thread to avoid blocking the event loop
+                image_url = await loop.run_in_executor(None, get_image_url, short_url)
+
+                if image_url:
+                    # Prepare the message content
+                    # Plain text body
+                    message_text = f"Short URL: {short_url}\nImage URL: {image_url}"
+
+                    # Formatted body with the image URL disguised as the Short-URL
+                    html_content = f'Short URL: <a href="{image_url}">{short_url}</a>'
+
                     content = {
                         "msgtype": "m.text",
-                        "body": f"Sent to URL: {url}"
+                        "body": message_text,
+                        "format": "org.matrix.custom.html",
+                        "formatted_body": html_content,
                     }
-                    await client.room_send(
-                        room_id=room_id,
-                        message_type="m.room.message",
-                        content=content
-                    )
-                    print(f"Sent to room {room_id}: {url}")
+
+                    # Send the message to all joined rooms
+                    for room_id in client.rooms:
+                        await client.room_send(
+                            room_id=room_id,
+                            message_type="m.room.message",
+                            content=content
+                        )
+                        print(f"Sent to room {room_id}: {short_url} -> {image_url}")
+                else:
+                    print("Could not retrieve image URL.")
+                    await asyncio.sleep(1)
+                    continue
 
                 # Sleep for 1 second before generating the next URL
                 await asyncio.sleep(1)
