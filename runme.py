@@ -1,55 +1,109 @@
-import requests
+import asyncio
 import string
 import random
-import time
-import os
 import sys
+import os
 import json
-from keep_alive import keep_alive
+import threading
+from aiohttp import web
+from nio import (
+    AsyncClient,
+    LoginResponse,
+    RoomInviteEvent,
+    InviteMemberEvent,
+    RoomMessageText,
+)
+
+# Keep Alive Functionality
+async def handle_root(request):
+    return web.Response(text="Bot is running.")
+
+def start_keep_alive():
+    app = web.Application()
+    app.add_routes([web.get('/', handle_root)])
+    runner = web.AppRunner(app)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(runner.setup())
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    loop.run_until_complete(site.start())
 
 # Load configuration from config.json
 with open("config.json", "r") as file:
     config = json.load(file)
-    discord_webhook_url = config["discord_webhook_url"]
+    homeserver_url = config["homeserver_url"]
+    user_id = config["user_id"]
+    password = config["password"]
 
-# Start the Flask server to keep the script alive
-keep_alive()
+async def main():
+    client = AsyncClient(homeserver_url, user_id)
 
-# Continuously generate and send random URLs to Discord webhook
-while True:
+    # Start the keep-alive server in a background task
+    asyncio.create_task(start_keep_alive())
+
+    # Login to the Matrix server
+    response = await client.login(password)
+
+    if isinstance(response, LoginResponse):
+        print("Login successful")
+    else:
+        print(f"Failed to login: {response}")
+        return
+
+    # Define an event callback for invites
+    @client.event_listener(RoomInviteEvent)
+    async def on_invite(event):
+        room_id = event.room_id
+        print(f"Received invite to {room_id}, attempting to join...")
+        await client.join(room_id)
+
+    # Start syncing in the background
+    async def sync_loop():
+        while True:
+            await client.sync(timeout=30000)
+            await asyncio.sleep(1)
+
+    asyncio.create_task(sync_loop())
+
     try:
-        # Generate a random string of 5 lowercase characters
-        random_suffix = "".join(random.choices(string.ascii_lowercase, k=5))
+        while True:
+            try:
+                # Generate a random string of 5 lowercase characters
+                random_suffix = "".join(random.choices(string.ascii_lowercase, k=5))
 
-        # Prepend the suffix with "s"
-        random_string = "s" + random_suffix
+                # Prepend the suffix with "s"
+                random_string = "s" + random_suffix
 
-        # Print the current random string being tested
-        print(f"Testing {random_string}...")
+                # Print the current random string being tested
+                print(f"Testing {random_string}...")
 
-        # Get the URL of the subdirectory
-        url = "https://prnt.sc/" + random_string
+                # Get the URL of the subdirectory
+                url = "https://prnt.sc/" + random_string
 
-        # Send the URL to the Discord webhook using requests.post()
-        payload = {"content": f"Sent to URL: {url}"}
-        response = requests.post(discord_webhook_url, data=payload)
+                # Send the URL to all joined rooms
+                for room_id in client.rooms:
+                    content = {
+                        "msgtype": "m.text",
+                        "body": f"Sent to URL: {url}"
+                    }
+                    await client.room_send(
+                        room_id=room_id,
+                        message_type="m.room.message",
+                        content=content
+                    )
+                    print(f"Sent to room {room_id}: {url}")
 
-        # Check if the response was successful
-        if response.ok:
-            print(f"Sent to URL: {url}")
-        else:
-            print(f"Failed to send URL: {url}")
+                # Sleep for 1 second before generating the next URL
+                await asyncio.sleep(1)
 
-        # Sleep for 1 second before generating the next URL
-        time.sleep(1)
+            except Exception as e:
+                # Print any exceptions that occur
+                print(f"Exception occurred: {e}")
 
-    except Exception as e:
-        # Print any exceptions that occur
-        print(f"Exception occurred: {e}")
+                # Wait for 30 seconds before restarting the loop
+                await asyncio.sleep(30)
 
-        # Wait for 30 seconds before restarting the loop
-        time.sleep(30)
+    finally:
+        await client.close()
 
-        # Restart the script
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+if __name__ == "__main__":
+    asyncio.run(main())

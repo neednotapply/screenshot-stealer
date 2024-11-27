@@ -1,3 +1,5 @@
 {
-    "discord_webhook_url": "YOUR-DISCORD-WEBHOOK-HERE"
+    "homeserver_url": "https://matrix.org",  // Replace with your homeserver URL
+    "user_id": "@yourusername:matrix.org",   // Replace with your full Matrix user ID
+    "password": "yourpassword"               // Replace with your password
 }
