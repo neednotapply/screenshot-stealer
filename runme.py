@@ -9,23 +9,21 @@ from aiohttp import web
 from nio import (
     AsyncClient,
     LoginResponse,
-    RoomInviteEvent,
-    InviteMemberEvent,
-    RoomMessageText,
+    InviteEvent,
+    MatrixRoom,
 )
 
 # Keep Alive Functionality
 async def handle_root(request):
     return web.Response(text="Bot is running.")
 
-def start_keep_alive():
+async def start_keep_alive():
     app = web.Application()
     app.add_routes([web.get('/', handle_root)])
     runner = web.AppRunner(app)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(runner.setup())
+    await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
-    loop.run_until_complete(site.start())
+    await site.start()
 
 # Load configuration from config.json
 with open("config.json", "r") as file:
@@ -50,11 +48,13 @@ async def main():
         return
 
     # Define an event callback for invites
-    @client.event_listener(RoomInviteEvent)
-    async def on_invite(event):
-        room_id = event.room_id
+    async def on_invite(room: MatrixRoom, event: InviteEvent):
+        room_id = room.room_id
         print(f"Received invite to {room_id}, attempting to join...")
         await client.join(room_id)
+
+    # Add the invite callback
+    client.add_event_callback(on_invite, InviteEvent)
 
     # Start syncing in the background
     async def sync_loop():
