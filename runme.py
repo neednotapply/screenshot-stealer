@@ -136,10 +136,10 @@ async def main():
 
                 if image_url:
                     # Prepare the message content
-                    # Plain text body
-                    message_text = f"Screenshot found at {random_string}"
+                    # Plain text body includes the image URL on a new line
+                    message_text = f"Screenshot found at {random_string}\n{image_url}"
 
-                    # Formatted body with the image URL hyperlinked to the random_string
+                    # Formatted body hides the image URL from the user
                     html_content = f'Screenshot found at <a href="{image_url}">{random_string}</a>'
 
                     content = {
