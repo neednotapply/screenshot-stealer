@@ -128,7 +128,7 @@ async def main():
                 # Print the current random string being tested
                 print(f"Testing {random_string}...")
 
-                # Get the URL of the subdirectory
+                # Get the Short URL
                 short_url = "https://prnt.sc/" + random_string
 
                 # Run get_image_url in a separate thread to avoid blocking the event loop
@@ -137,10 +137,10 @@ async def main():
                 if image_url:
                     # Prepare the message content
                     # Plain text body
-                    message_text = f"Short URL: {short_url}\nImage URL: {image_url}"
+                    message_text = f"Screenshot found at {random_string}"
 
-                    # Formatted body with the image URL disguised as the Short-URL
-                    html_content = f'Short URL: <a href="{image_url}">{short_url}</a>'
+                    # Formatted body with the image URL hyperlinked to the random_string
+                    html_content = f'Screenshot found at <a href="{image_url}">{random_string}</a>'
 
                     content = {
                         "msgtype": "m.text",
@@ -156,7 +156,7 @@ async def main():
                             message_type="m.room.message",
                             content=content
                         )
-                        print(f"Sent to room {room_id}: {short_url} -> {image_url}")
+                        print(f"Sent to room {room_id}: {random_string} -> {image_url}")
                 else:
                     print("Could not retrieve image URL.")
                     await asyncio.sleep(1)
