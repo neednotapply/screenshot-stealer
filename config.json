@@ -1,5 +1,5 @@
 {
-    "homeserver_url": "https://matrix.org",  // Replace with your homeserver URL
-    "user_id": "@yourusername:matrix.org",   // Replace with your full Matrix user ID
-    "password": "yourpassword"               // Replace with your password
+    "homeserver_url": "https://matrix.org",
+    "user_id": "@yourusername:matrix.org",
+    "password": "yourpassword"
 }
