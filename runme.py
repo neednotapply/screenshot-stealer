@@ -26,7 +26,7 @@ async def start_keep_alive():
     await site.start()
 
 # Load configuration
-with open("/lightshot/config.json", "r") as file:
+with open("config.json", "r") as file:
     config = json.load(file)
     homeserver_url = config["homeserver_url"]
     user_id = config["user_id"]
