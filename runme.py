@@ -4,19 +4,14 @@ import random
 import sys
 import os
 import json
-import threading
+from aiohttp import web
 from nio import (
     AsyncClient,
     LoginResponse,
     InviteEvent,
     MatrixRoom,
 )
-from aiohttp import web
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
+from playwright.async_api import async_playwright
 
 # Keep Alive Functionality
 async def handle_root(request):
@@ -30,83 +25,65 @@ async def start_keep_alive():
     site = web.TCPSite(runner, '0.0.0.0', 8080)
     await site.start()
 
-# Load configuration from config.json
-with open("config.json", "r") as file:
+# Load configuration
+with open("/lightshot/config.json", "r") as file:
     config = json.load(file)
     homeserver_url = config["homeserver_url"]
     user_id = config["user_id"]
     password = config["password"]
 
-def get_image_url(url):
-    # Set up headless Chrome
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument("--window-size=1920,1080")
-
-    # Initialize the WebDriver
-    service = ChromeService(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-
+async def get_image_url(url: str) -> str:
+    """
+    Launch a headless browser with Playwright,
+    load the given URL, and extract the image src.
+    """
     try:
-        # Load the page
-        driver.get(url)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(url)
 
-        # Wait for the image to load
-        driver.implicitly_wait(10)
+            # Wait for the screenshot image to appear (optional)
+            await page.wait_for_selector("#screenshot-image", timeout=5000)
 
-        # Find the image element by id
-        image_element = driver.find_element(By.ID, 'screenshot-image')
+            # Get the 'src' attribute of the image
+            image_url = await page.get_attribute("#screenshot-image", "src")
 
-        # Extract the 'src' attribute
-        image_url = image_element.get_attribute('src')
+            await browser.close()
 
-        # Handle cases where the image URL is invalid
-        if not image_url or 'imageshack' in image_url:
-            print("Image URL is invalid or not available.")
-            return None
-
-        # Handle relative URLs if necessary
-        if image_url.startswith('//'):
-            image_url = 'https:' + image_url
-        elif image_url.startswith('/'):
-            image_url = 'https://prnt.sc' + image_url
-
-        return image_url
+            if image_url:
+                # Fix relative URLs if needed
+                if image_url.startswith('//'):
+                    image_url = 'https:' + image_url
+                elif image_url.startswith('/'):
+                    image_url = 'https://prnt.sc' + image_url
+                return image_url
 
     except Exception as e:
         print(f"Error getting image URL: {e}")
-        return None
 
-    finally:
-        driver.quit()
+    return None
 
 async def main():
     client = AsyncClient(homeserver_url, user_id)
 
-    # Start the keep-alive server in a background task
     asyncio.create_task(start_keep_alive())
 
-    # Login to the Matrix server
+    # Login
     response = await client.login(password)
-
     if isinstance(response, LoginResponse):
         print("Login successful")
     else:
         print(f"Failed to login: {response}")
         return
 
-    # Define an event callback for invites
     async def on_invite(room: MatrixRoom, event: InviteEvent):
         room_id = room.room_id
         print(f"Received invite to {room_id}, attempting to join...")
         await client.join(room_id)
 
-    # Add the invite callback
     client.add_event_callback(on_invite, InviteEvent)
 
-    # Start syncing in the background
     async def sync_loop():
         while True:
             await client.sync(timeout=30000)
@@ -114,32 +91,24 @@ async def main():
 
     asyncio.create_task(sync_loop())
 
-    loop = asyncio.get_event_loop()
-
     try:
         while True:
             try:
-                # Generate a random string of 5 lowercase characters
                 random_suffix = "".join(random.choices(string.ascii_lowercase, k=5))
-
-                # Prepend the suffix with "s"
                 random_string = "s" + random_suffix
-
-                # Print the current random string being tested
                 print(f"Testing {random_string}...")
 
-                # Get the Short URL
+                # Build the short URL
                 short_url = "https://prnt.sc/" + random_string
 
-                # Run get_image_url in a separate thread to avoid blocking the event loop
-                image_url = await loop.run_in_executor(None, get_image_url, short_url)
+                # Get image URL using Playwright
+                image_url = await get_image_url(short_url)
 
                 if image_url:
-                    # Prepare the message content
-                    # Plain text body includes the image URL on a new line
+                    # Plain text body (for URL preview)
                     message_text = f"Screenshot found at {random_string}\n{image_url}"
 
-                    # Formatted body hides the image URL from the user
+                    # HTML body (clean presentation)
                     html_content = f'Screenshot found at <a href="{image_url}">{random_string}</a>'
 
                     content = {
@@ -149,27 +118,22 @@ async def main():
                         "formatted_body": html_content,
                     }
 
-                    # Send the message to all joined rooms
                     for room_id in client.rooms:
                         await client.room_send(
                             room_id=room_id,
                             message_type="m.room.message",
                             content=content
                         )
-                        print(f"Sent to room {room_id}: {random_string} -> {image_url}")
+                        print(f"Sent to {room_id}: {random_string} -> {image_url}")
                 else:
                     print("Could not retrieve image URL.")
                     await asyncio.sleep(1)
                     continue
 
-                # Sleep for 1 second before generating the next URL
                 await asyncio.sleep(1)
 
             except Exception as e:
-                # Print any exceptions that occur
                 print(f"Exception occurred: {e}")
-
-                # Wait for 30 seconds before restarting the loop
                 await asyncio.sleep(30)
 
     finally:
